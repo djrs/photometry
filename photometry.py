@@ -6,7 +6,9 @@ from astropy import units as u
 import reddening
 
 class photometry(object):
-    """A class to store photometry data output from DOLPHOT
+    """A class to store photometry data and artificial stars as output
+    by DOLPHOT. This class is modified to preserve the full raw data
+    catalogs without any culling and without extinction corrections.
 
     Parameters
     ----------
@@ -33,6 +35,17 @@ class photometry(object):
         Array of the exposure lengths in seconds from the first filter
     exposures2 : float array
         Array of the exposure lengths in seconds from the second filter
+
+    x_in : float array
+        Input x positions of the detections on the reference image if
+        applicable
+    y_in : float array
+        Input y positions of the detections on the reference image if
+        applicable
+    mag1_in : float array
+        Input magnitude of the stars in the first filter if applicable
+    mag2_in : float array
+        Input magnitude of the stars in the second filter if applicable
 
     x : float array
         x positions of the detections on the reference image
@@ -89,37 +102,45 @@ class photometry(object):
         self.reference = reference
         self.get_ra_dec()
         self.get_info()
-        self.extinction_mag1, self.extinction_mag2 = reddening.find_ra_dec(self.ra,self.dec)
+        # Initialise the photometry data
+        self.x_in     = np.asfarray([])
+        self.y_in     = np.asfarray([])
+        self.mag1_in  = np.asfarray([])
+        self.mag2_in  = np.asfarray([])
+        self.x        = np.asfarray([])
+        self.y        = np.asfarray([])
+        self.type     = np.asarray([], np.uint8)
+        self.back1    = np.asfarray([])
+        self.mag1     = np.asfarray([])
+        self.mag1_err = np.asfarray([])
+        self.chi1     = np.asfarray([])
+        self.sn1      = np.asfarray([])
+        self.sharp1   = np.asfarray([])
+        self.round1   = np.asfarray([])
+        self.crowd1   = np.asfarray([])
+        self.flag1    = np.asarray([], np.uint8)
+        self.back2    = np.asfarray([])
+        self.mag2     = np.asfarray([])
+        self.mag2_err = np.asfarray([])
+        self.chi2     = np.asfarray([])
+        self.sn2      = np.asfarray([])
+        self.sharp2   = np.asfarray([])
+        self.round2   = np.asfarray([])
+        self.crowd2   = np.asfarray([])
+        self.flag2    = np.asarray([], np.uint8)
 
         # Load in the photometry file
         if os.path.exists(name):
             if (name[-7:]=='phot.gz'):
                 self.loadDOLPHOT()
-            elif (name[-16:]=='phot_abridged.gz'):
-                self.loadDOLPHOTabridged()
+                self.extinction_mag1, self.extinction_mag2 = reddening.find_ra_dec(self.ra,self.dec)
+            elif (name.find('fake')>0):
+                self.loadDOLPHOTartificial()
+                self.extinction_mag1, self.extinction_mag2 = (0,0)
             else:
                 print "Photometry file format not recognized"
         else:
             print "Photometry files", name, "not found"
-            self.x        = np.asfarray([0])
-            self.y        = np.asfarray([0])
-            self.type     = np.asarray([0], np.uint8)
-            self.mag1     = np.asfarray([0] - self.extinction_mag1)
-            self.mag1_err = np.asfarray([0])
-            self.chi1     = np.asfarray([0])
-            self.sn1      = np.asfarray([0])
-            self.sharp1   = np.asfarray([0])
-            self.round1   = np.asfarray([0])
-            self.crowd1   = np.asfarray([0])
-            self.flag1    = np.asarray([0], np.uint8)
-            self.mag2     = np.asfarray([0] - self.extinction_mag2)
-            self.mag2_err = np.asfarray([0])
-            self.chi2     = np.asfarray([0])
-            self.sn2      = np.asfarray([0])
-            self.sharp2   = np.asfarray([0])
-            self.round2   = np.asfarray([0])
-            self.crowd2   = np.asfarray([0])
-            self.flag2    = np.asarray([0], np.uint8)
     
     def get_ra_dec(self):
         """A method that returns the RA and Dec from the reference
@@ -164,8 +185,7 @@ class photometry(object):
 
 
     def loadDOLPHOT(self):
-        """Loads data from the original DOLPHOT photometry file and
-        applies some broad selection cuts
+        """Loads data from the original DOLPHOT photometry file
         
         Parameters & Attributes
         -----------------------
@@ -173,49 +193,38 @@ class photometry(object):
 
         Notes
         -----
-        Filters the selection based on cuts on object type, signal to
-        noise ration, and sharpness
+        No filtering of the raw data, and no extinction correction
         """
         print self.name
         phot = np.loadtxt(self.name)
         
-        # Select objects of type 1 with error flags = 1 or 2
-        sel = (phot[:,24]<=2) & (phot[:,37]<=2) & (phot[:,11]==1) 
-        # Select objects with a signal/noise ratio >=5
-        sel = (sel) & (phot[:,20]>=5.0) & (phot[:,33]>=5.0)
-        # Select objects with a combined sharpness > -0.06
-        sel = (sel & (phot[:,21]+phot[:,34] > -0.06))
-        # Select objects with a combined sharpness < 1.30
-        sel = (sel & (phot[:,21]+phot[:,34] < 1.30))
-
-        print "Culled data from", len(sel), "detections to", np.sum(sel)
-
-        self.x        = np.asfarray(phot[sel,3])
-        self.y        = np.asfarray(phot[sel,4])
-        self.type     = np.asarray(phot[sel,11], np.uint8)
+        self.x        = np.asfarray(phot[:,3])
+        self.y        = np.asfarray(phot[:,4])
+        self.type     = np.asarray(phot[:,11], np.uint8)
         # Apply extinction correction
-        self.mag1     = np.asfarray(phot[sel,16] - self.extinction_mag1)
-        self.mag1_err = np.asfarray(phot[sel,18])
-        self.chi1     = np.asfarray(phot[sel,19])
-        self.sn1      = np.asfarray(phot[sel,20])
-        self.sharp1   = np.asfarray(phot[sel,21])
-        self.round1   = np.asfarray(phot[sel,22])
-        self.crowd1   = np.asfarray(phot[sel,23])
-        self.flag1    = np.asarray(phot[sel,24], np.uint8)
+        self.back1    = np.asfarray(phot[:,13])
+        self.mag1     = np.asfarray(phot[:,16])
+        self.mag1_err = np.asfarray(phot[:,18])
+        self.chi1     = np.asfarray(phot[:,19])
+        self.sn1      = np.asfarray(phot[:,20])
+        self.sharp1   = np.asfarray(phot[:,21])
+        self.round1   = np.asfarray(phot[:,22])
+        self.crowd1   = np.asfarray(phot[:,23])
+        self.flag1    = np.asarray(phot[:,24], np.uint8)
         # Apply extinction correction
-        self.mag2     = np.asfarray(phot[sel,29] - self.extinction_mag2)
-        self.mag2_err = np.asfarray(phot[sel,31])
-        self.chi2     = np.asfarray(phot[sel,32])
-        self.sn2      = np.asfarray(phot[sel,33])
-        self.sharp2   = np.asfarray(phot[sel,34])
-        self.round2   = np.asfarray(phot[sel,35])
-        self.crowd2   = np.asfarray(phot[sel,36])
-        self.flag2    = np.asarray(phot[sel,37], np.uint8)
+        self.back2    = np.asfarray(phot[:,26])
+        self.mag2     = np.asfarray(phot[:,29])
+        self.mag2_err = np.asfarray(phot[:,31])
+        self.chi2     = np.asfarray(phot[:,32])
+        self.sn2      = np.asfarray(phot[:,33])
+        self.sharp2   = np.asfarray(phot[:,34])
+        self.round2   = np.asfarray(phot[:,35])
+        self.crowd2   = np.asfarray(phot[:,36])
+        self.flag2    = np.asarray(phot[:,37], np.uint8)
 
-            
-    def loadDOLPHOTabridged(self):
-        """Loads data from the GHOSTS photometry file and applies some
-        broad selection cuts
+
+    def loadDOLPHOTartificial(self):
+        """Loads data from the artificial star tests output by DOLPHOT
         
         Parameters & Attributes
         -----------------------
@@ -223,46 +232,70 @@ class photometry(object):
 
         Notes
         -----
-        Filters the selection based on cuts on object type, signal to
-        noise ration, and sharpness
+        No filtering of the raw data and no extinction correction
         """
-        print self.name
-        phot = np.loadtxt(self.name)
+
+        file_dir = self.name[:self.name.rfind('/')]
+        base_name = os.path.basename(self.name)
+        phot_file_name = "{}/{}.phot.info".format(file_dir, base_name[:base_name.find('.')])
+        posF606 = False
+        posF814 = False
+        nframe=0
+        with open(phot_file_name, "r") as filestream:
+            # Find the number of exposures in the combined photometry
+            nframe = int(filestream.readline().split()[0])         
+            # Find the filter order 
+            i = 1
+            while(not (bool(posF606) & bool(posF814))):
+              try:
+                line = filestream.readline().split()[3]
+                if ((line == 'F606W') & (not posF606)):
+                    posF606 = i
+                if ((line == 'F814W') & (not posF814)):
+                    posF814 = i
+                i+=1
+              except:
+                i+=1
+                continue
+            posmin = min(posF606,posF814)
+            posF606 -= posmin
+            posF814 -= posmin
+            print posF606,posF814
         
-        # Select objects of type 1 with error flags = 1 or 2
-        sel = (phot[:,12]<=2) & (phot[:,22]<=2) & (phot[:,2]==1) 
-        # Select objects with a signal/noise ratio >=5
-        sel = (sel) & (phot[:,8]>=5.0) & (phot[:,18]>=5.0)
-        # Select objects with a combined sharpness > -0.06
-        sel = (sel & (phot[:,9]+phot[:,19] > -0.06))
-        # Select objects with a combined sharpness < 1.30
-        sel = (sel & (phot[:,9]+phot[:,19] < 1.30))
+        # Calculate the offset to the combined photometry sets for each filter
+        offset = 3 + nframe*2
+        
+        # Find, load and append all the individual artificial star tests for the field
+        files = glob(self.name[:self.name.rfind('_')])
+        for fn in files:
+            phot = np.loadtxt(fn)
+            self.x_in     = np.append(self.x, np.asfarray(phot[:,2]))
+            self.y_in     = np.append(self.y, np.asfarray(phot[:,3]))
+            self.mag1_in  = np.append(self.mag1_in, np.asfarray(phot[:,5+posF606*2]))
+            self.mag2_in  = np.append(self.mag2_in, np.asfarray(phot[:,5+posF814*2]))
+            self.x        = np.append(self.x, np.asfarray(phot[:,3 + offset]))
+            self.y        = np.append(self.y, np.asfarray(phot[:,4 + offset]))
+            self.type     = np.append(self.type, np.asarray(phot[:,11 + offset], np.uint8))
+            self.back1    = np.append(self.back1, np.asfarray(phot[:,13 + offset]))
+            self.mag1     = np.append(self.mag1, np.asfarray(phot[:,16 + offset]))
+            self.mag1_err = np.append(self.mag1_err, np.asfarray(phot[:,18 + offset]))
+            self.chi1     = np.append(self.chi1, np.asfarray(phot[:,19 + offset]))
+            self.sn1      = np.append(self.sn1, np.asfarray(phot[:,20 + offset]))
+            self.sharp1   = np.append(self.sharp1, np.asfarray(phot[:,21 + offset]))
+            self.round1   = np.append(self.round1, np.asfarray(phot[:,22 + offset]))
+            self.crowd1   = np.append(self.crowd1, np.asfarray(phot[:,23 + offset]))
+            self.flag1    = np.append(self.flag1, np.asarray(phot[:,24 + offset], np.uint8))
+            self.back2    = np.append(self.back2, np.asfarray(phot[:,26 + offset]))
+            self.mag2     = np.append(self.mag2, np.asfarray(phot[:,29 + offset]))
+            self.mag2_err = np.append(self.mag2_err, np.asfarray(phot[:,31 + offset]))
+            self.chi2     = np.append(self.chi2, np.asfarray(phot[:,32 + offset]))
+            self.sn2      = np.append(self.sn2, np.asfarray(phot[:,33 + offset]))
+            self.sharp2   = np.append(self.sharp2, np.asfarray(phot[:,34 + offset]))
+            self.round2   = np.append(self.round2, np.asfarray(phot[:,35 + offset]))
+            self.crowd2   = np.append(self.crowd2, np.asfarray(phot[:,36 + offset]))
+            self.flag2    = np.append(self.flag2, np.asarray(phot[:,37 + offset], np.uint8))
 
-        print "Culled data from", len(sel), "detections to", np.sum(sel)
-
-        self.x        = np.asfarray(phot[sel,0])
-        self.y        = np.asfarray(phot[sel,1])
-        self.type     = np.asarray(phot[sel,2], np.uint8)
-        # Apply extinction correction
-        self.mag1     = np.asfarray(phot[sel,4] - self.extinction_mag1)
-        self.mag1_err = np.asfarray(phot[sel,6])
-        self.chi1     = np.asfarray(phot[sel,7])
-        self.sn1      = np.asfarray(phot[sel,8])
-        self.sharp1   = np.asfarray(phot[sel,9])
-        self.round1   = np.asfarray(phot[sel,10])
-        self.crowd1   = np.asfarray(phot[sel,11])
-        self.flag1    = np.asarray(phot[sel,12], np.uint8)
-        # Apply extinction correction
-        self.mag2     = np.asfarray(phot[sel,14] - self.extinction_mag2)
-        self.mag2_err = np.asfarray(phot[sel,16])
-        self.chi2     = np.asfarray(phot[sel,17])
-        self.sn2      = np.asfarray(phot[sel,18])
-        self.sharp2   = np.asfarray(phot[sel,19])
-        self.round2   = np.asfarray(phot[sel,20])
-        self.crowd2   = np.asfarray(phot[sel,21])
-        self.flag2    = np.asarray(phot[sel,22], np.uint8)
-
-def load_from_dir(dir,drz_dir="/Volumes/data/processed/drc",outfile="photometry.dat"):
+def load_from_dir(dir,drz_dir="/Volumes/data/processed/drc",outfile="photometry_full.dat"):
     """Loads photometry files into a list of photometry classes and
     saves as a binary file
         
@@ -280,11 +313,8 @@ def load_from_dir(dir,drz_dir="/Volumes/data/processed/drc",outfile="photometry.
         not specified defaults to "photometry.dat" in the current
         directory
     """
-    # Load in the files, try the abridged version first and if they
-    # don't exist look for the raw DOLPHOT output
-    files = glob("{}/*phot_abridged.gz".format(dir))
-    if (len(files)<1):
-        files = glob("{}/*phot.gz".format(dir))
+    # Load in the files
+    files = glob("{}/*phot.gz".format(dir))
     if (os.path.exists(outfile)):
         os.system('rm {}'.format(outfile))
     photometry_list = []
@@ -304,4 +334,4 @@ def load_from_dir(dir,drz_dir="/Volumes/data/processed/drc",outfile="photometry.
 if __name__=="__main__":
     # If this file is called from the command line, will load
     # photometry data from the directory "/Volumes/data/HStars/dolphot
-    load_from_dir('/Volumes/data/HStars/dolphot')
+    load_from_dir('/Volumes/data/empty/')
